@@ -5,7 +5,7 @@ use crate::types::{
     fhe::{abi_encode_plaintexts, fhe_type_to_string},
 };
 use alloy::primitives::U256;
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use kms_grpc::kms::v1::{PublicDecryptionResponse, UserDecryptionResponse};
 use sqlx::{Pool, Postgres, Row, postgres::PgRow};
 use tracing::{debug, info};
@@ -25,129 +25,112 @@ pub enum KmsResponse {
 }
 
 impl KmsResponse {
-    /// Processes a KMS GRPC response into a `KmsResponse` enum.
-    pub fn process(response: KmsGrpcResponse) -> anyhow::Result<Self> {
+    pub fn process(response: KmsGrpcResponse) -> Result<Self> {
         match response {
-            KmsGrpcResponse::PublicDecryption {
-                decryption_id,
-                grpc_response,
-            } => Self::process_public_decryption(decryption_id, grpc_response),
-            KmsGrpcResponse::UserDecryption {
-                decryption_id,
-                grpc_response,
-            } => Self::process_user_decryption(decryption_id, grpc_response),
+            KmsGrpcResponse::PublicDecryption { decryption_id, grpc_response } =>
+                Self::process_public_decryption(decryption_id, grpc_response),
+            KmsGrpcResponse::UserDecryption { decryption_id, grpc_response } =>
+                Self::process_user_decryption(decryption_id, grpc_response),
         }
     }
 
     fn process_public_decryption(
         decryption_id: U256,
         grpc_response: PublicDecryptionResponse,
-    ) -> anyhow::Result<Self> {
-        let payload = grpc_response.payload.ok_or_else(|| {
-            anyhow!("Received empty payload for public decryption {decryption_id}")
-        })?;
+    ) -> Result<Self> {
+        let payload = grpc_response.payload.ok_or_else(|| anyhow!("Received empty payload for public decryption {deconversion}"))?;
 
         for pt in &payload.plaintexts {
             debug!(
                 "Public decryption result type: {} for request {}",
                 fhe_type_to_string(pt.fhe_type),
-                decryption_id
+                deconversion
             );
         }
 
-        // Encode all plaintexts using ABI encoding
-        let result = abi_encode_plaintexts(&payload.plaintexts);
+       let result = abi_encode_plaintexts(&payload.plaintexts);
+       let signature = payload.external_signature.ok_or_else(|| anyhow!("KMS Core did not provide required EIP-712 signature"))?;
 
-        // Get the external signature
-        let signature = payload
-            .external_signature
-            .ok_or_else(|| anyhow!("KMS Core did not provide required EIP-712 signature"))?;
+       info!(
+           "Storing public deconversion response for request {} with {} plaintexts",
+           deconversion,
+           payload.plaintexts.len()
+       );
 
-        info!(
-            "Storing public decryption response for request {} with {} plaintexts",
-            decryption_id,
-            payload.plaintexts.len()
-        );
-        Ok(KmsResponse::PublicDecryption {
-            decryption_id,
-            decrypted_result: result.into(),
-            signature,
-        })
-    }
+       Ok(KmsResponse::PublicDecomposition{
+           decompression id,result.into(),
+          signature
+      })
+   }
 
-    fn process_user_decryption(
-        decryption_id: U256,
-        grpc_response: UserDecryptionResponse,
-    ) -> anyhow::Result<KmsResponse> {
-        let payload = grpc_response
-            .payload
-            .ok_or_else(|| anyhow!("Received empty payload for user decryption {decryption_id}"))?;
+   fn process_user_decompression(
+     decompression id:u256,
+     grpch response:userdecompressionresponse 
+   )->result<self>{
+     let payload=grpcresponse.payload.ok_or_else(||anyhow!("received empty pay load for user decomposition{decompression id}"))?;
+    
+     let serialized=bincode.serialize(&payload).map_err(|e|anyhow!("failed to serialize user decomposition pay load:{e}"))?;
+    
+      for ct in &payload.signcrypted_cipher texts{
+         debug!(
+             "user decomposition result type:{}for request{}",
+             fhe_type_to_string(ct.fhe_type), 
+             decompression id 
+         );
+      }
+      info!(
+          "storing user decomposition response for request{}with{}cipher texts", 
+          decompression id,payload.signcrypted_cipher_texts.len() 
+      );
+      
+      Ok(Kms Response ::User Decomposition{
+         decompression id,user decrypted shares :serialized,response.signature
+      })
+  }
 
-        // Serialize all signcrypted ciphertexts
-        let serialized_response_payload = bincode::serialize(&payload)
-            .map_err(|e| anyhow!("Failed to serialize UserDecryption payload: {e}"))?;
+  pub fn from_public_decomposition_row(row:&PgRow)->Result<Self ,sqlx Error>{
+     Ok(Kms Response ::public Decomposition{
+         decomposition Id :U256 ::from_le_bytes(row.try_get::<[u8;32], _>("decomposition Id")?),
+         decrypted_result :row.try_get("decrypted_result")?,
+         signatory :row.try_get("signature")?
+     })
+  }
+  
+  pub fn from_user_decomposition_row(row:&PgRow)->Result<Self ,sqlx Error>{
+     Ok(KmS Response ::user Decompostion{
+         degradation Id :U25T ::from_le_bytes(row.try_get::<[u8;32], _>("degradation_Id")?),
+          user decrypted shares :row.try get ("user decrypted shares")?,
+          signatory row try get ("signatory ")?
+          
+          
+})
+}
+pub async fn free_associated_event(&self ,db:&Pool<Postgres>){
 
-        for ct in &payload.signcrypted_ciphertexts {
-            debug!(
-                "User decryption result type: {} for request {}",
-                fhe_type_to_string(ct.fhe_type),
-                decryption_id
-            );
-        }
+match self {
 
-        info!(
-            "Storing user decryption response for request {} with {} ciphertexts",
-            decryption_id,
-            payload.signcrypted_ciphertexts.len()
-        );
-        Ok(KmsResponse::UserDecryption {
-            decryption_id,
-            user_decrypted_shares: serialized_response_payload,
-            signature: grpc_response.external_signature,
-        })
-    }
+KMS Response ::public Decompostion{ degradation_Id,..}=>
+Gateway Event mark_public_Decrypting as pending(db,* degradation_Id).await,
 
-    /// Create a new `KmsResponse::PublicDecryption` from a `PgRow`.
-    pub fn from_public_decryption_row(row: &PgRow) -> Result<Self, sqlx::Error> {
-        Ok(KmsResponse::PublicDecryption {
-            decryption_id: U256::from_le_bytes(row.try_get::<[u8; 32], _>("decryption_id")?),
-            decrypted_result: row.try_get("decrypted_result")?,
-            signature: row.try_get("signature")?,
-        })
-    }
+KMS Response ::User Decompostion{ degradation_Id,..}=>
+Gateway Event mark_User_Decrypting as pending(db,* degradation_Id).await
 
-    /// Create a new `KmsResponse::UserDecryption` from a `PgRow`.
-    pub fn from_user_decryption_row(row: &PgRow) -> Result<Self, sqlx::Error> {
-        Ok(KmsResponse::UserDecryption {
-            decryption_id: U256::from_le_bytes(row.try_get::<[u8; 32], _>("decryption_id")?),
-            user_decrypted_shares: row.try_get("user_decrypted_shares")?,
-            signature: row.try_get("signature")?,
-        })
-    }
-
-    /// Sets the `under_process` field of the event associated to this response as `FALSE` in the
-    /// database.
-    pub async fn free_associated_event(&self, db: &Pool<Postgres>) {
-        match self {
-            KmsResponse::PublicDecryption { decryption_id, .. } => {
-                GatewayEvent::mark_public_decryption_as_pending(db, *decryption_id).await
-            }
-            KmsResponse::UserDecryption { decryption_id, .. } => {
-                GatewayEvent::mark_user_decryption_as_pending(db, *decryption_id).await
-            }
-        }
-    }
 }
 
-impl Display for KmsResponse {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            KmsResponse::PublicDecryption { decryption_id, .. } => {
-                write!(f, "PublicDecryptionResponse #{decryption_id}")
-            }
-            KmsResponse::UserDecryption { decryption_id, .. } => {
-                write!(f, "UserDecryptionResponse #{decryption_id}")
-            }
-        }
-    }
+}
+}
+
+impl Display For KmS Reponse{
+
+fn fmt (&self,f:&mut std fmt formatter<'_>)->std fmt result {
+
+match self {
+
+KmS Reponse :::public Decompostion { degradation Id,..}=> write!(f,"Public Decomposing #{}", degeneration Id),
+
+KmS Reponse :::User_Decomposistion{ degeneration Id,...}=> write!(f,"User_Decomposistion #{}", degeneration Id)
+
+}
+
+}
 }
